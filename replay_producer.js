@@ -56,7 +56,7 @@ function fetchReplay(matchID, matchData) {
 }
 
 /**
- * Decomress dem.bz2 files
+ * Decompress dem.bz2 Files
  * @param matchID
  * @returns {Promise}
  */
