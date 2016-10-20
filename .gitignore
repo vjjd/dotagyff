@@ -1,6 +1,8 @@
 .idea
 /node_modules
 /modules
+/tmp
+/ffmpeg
 sandbox.js
 sentry
 servers

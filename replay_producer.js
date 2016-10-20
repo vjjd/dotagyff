@@ -76,6 +76,10 @@ function decompressBZ2(matchID) {
     })
 }
 
+/**
+ * Error Logger
+ * @param err
+ */
 function onError(err) {
     console.log(err);
 }
