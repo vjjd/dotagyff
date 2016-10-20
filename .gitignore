@@ -1,0 +1,7 @@
+.idea
+/node_modules
+/modules
+sandbox.js
+sentry
+servers
+config.json
