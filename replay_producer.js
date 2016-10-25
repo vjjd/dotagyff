@@ -10,7 +10,6 @@ let Dota2 = require('./steam_login'),
 const spawn = require('child_process').spawn;
 const startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8');
 const loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
-let startMovieConfig = require('./startmovie_config.json');
 let heroes = require('./heroes.json');
 
 // Variables
@@ -22,6 +21,15 @@ let matchMeta = {
     "info": "",
     "heroIndex": ""
 };
+
+/**
+ * Unlink Dota Log File condump000.txt for Test
+ */
+fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+  if(!err){
+      fs.unlinkSync(`${d2Dir}/dota/${config.dotaLogFile}`);
+  }
+});
 
 //Main Stage
 Dota2.on("ready", onD2Ready);
@@ -43,7 +51,7 @@ function onD2Ready() {
             .then(decompressBZ2, onError)
             .then(()=> {
                 fs.writeFile(`${d2Dir}/dota/cfg/loadreplay.cfg`,
-                    loadReplayTmpl.replace(/<-demoFile->/, `replays/${matchMeta.id}`),
+                    loadReplayTmpl.replace(/<-demoFileID->/, `replays/${matchMeta.id}`),
                     (err)=> {
                         if(err){ onError(err) }
                         const d2launch = spawn(`${d2Dir}/dota.sh`, ['-console -exec autoexec']);
@@ -96,7 +104,7 @@ function decompressBZ2(matchID) {
             fs.writeFile(`${d2Dir}/dota/replays/${matchID}.dem`, data, (err)=> {
                 if(err){ reject(err) }
 
-                console.log(`${matchID}.dem.bz2 was Decompressed`)
+                console.log(`${matchID}.dem.bz2 was Decompressed`);
                 resolve();
             });
         });
@@ -104,7 +112,7 @@ function decompressBZ2(matchID) {
 }
 
 /**
- * Calculate Start Tick and Write startmovie.cfg
+ * Calculate Game Start Tick and Write startmovie.cfg
  */
 function calculateStartTick() {
     fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
@@ -116,17 +124,17 @@ function calculateStartTick() {
                 let playbackTime = data.match(/playback_time: [0-9]*/i)[0].replace(/playback_time: /, '');
                 let startGameTick = (parseInt(playbackTime) - parseInt(matchMeta.info.match.duration) - 145) * 30;
 
-                console.log('Start Tick was Calculated');
+                console.log('Game Start Tick was Calculated');
 
                 fs.writeFile(`${d2Dir}/dota/cfg/startmovie.cfg`,
                     startMovieTmpl
-                        .replace(/<-frames->/, `${startMovieConfig.recordFPS}`)
+                        .replace(/<-frames->/, `${config.recordMovie.recordFPS}`)
                         .replace(/<-startGameTick->/, `${startGameTick}`)
                         .replace(/<-recordStartTime->/, `${matchMeta.recordStartTime}`)
                         .replace(/<-heroIndex->/, `${matchMeta.heroIndex}`)
-                        .replace(/<-specMode->/, `${startMovieConfig.specMode}`)
-                        .replace(/<-recordToDir->/, `${startMovieConfig.recordToDir}`)
-                        .replace(/<-recordDuration->/, `${startMovieConfig.recordDuration}`),
+                        .replace(/<-specMode->/, `${config.recordMovie.specMode}`)
+                        .replace(/<-recordToDir->/, `${config.recordMovie.recordToDir}`)
+                        .replace(/<-recordDuration->/, `${config.recordMovie.recordDuration}`),
                     (err)=> {
                         if(err){ onError(err) }
                         console.log('Start Movie CFG was Set');

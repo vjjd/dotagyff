@@ -1,4 +1,11 @@
 {
+  "recordMovie": {
+    "recordDuration" : 120,
+    "recordToDir": "test/testmovie",
+    "specMode" : 3,
+    "recordFPS": 60
+  },
+
   "bz2": "./tmp/bz2",
   "dem": "./tmp/dem",
   "dotaLogFile": "condump000.txt"

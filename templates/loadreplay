@@ -1,6 +1,6 @@
 alias -2.000000 "";
 alias 3000.000000 "#stop; showconsole; blink execute_command_every_frame 10 -2 3001";
-alias 3001.000000 "#stop; playdemo <-demoFile->; blink execute_command_every_frame 80 -2 3002";
+alias 3001.000000 "#stop; playdemo <-demoFileID->; blink execute_command_every_frame 80 -2 3002";
 alias 3002.000000 "#stop; clear; demo_info; condump; blink execute_command_every_frame 20 -2 3003";
 alias 3003.000000 "#stop; execifexists startmovie.cfg;
 #stop;blink execute_command_every_frame 5 -2 3000;
