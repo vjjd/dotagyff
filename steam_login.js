@@ -9,7 +9,7 @@ let steam = require("steam"),
     steamUser = new steam.SteamUser(steamClient),
     Dota2 = new dota2.Dota2Client(steamClient, true);
 
-global.config = require("./config").steam;
+global.config = require("./steam_config").steam;
 
 /**
  * Steam Login

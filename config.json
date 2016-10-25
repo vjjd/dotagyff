@@ -1,0 +1,5 @@
+{
+  "bz2": "./tmp/bz2",
+  "dem": "./tmp/dem",
+  "dotaLogFile": "condump000.txt"
+}

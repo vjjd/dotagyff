@@ -1,9 +1,8 @@
 .idea
 /node_modules
-/modules
 /tmp
 /ffmpeg
-sandbox.js
+/sandbox
 sentry
 servers
-config.json
+steam_config.json
