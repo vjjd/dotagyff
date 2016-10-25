@@ -1,6 +1,0 @@
-{
-  "recordDuration" : 120,
-  "recordToDir": "test/testmovie",
-  "specMode" : 3,
-  "recordFPS": 60
-}
