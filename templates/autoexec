@@ -1,0 +1,3 @@
+sv_cheats 1; alias ff "#stop;disconnect"; alias #on "log_flags General -donotecho | grep !@#"; alias #off "log_flags General +donotecho | grep !@#"; setinfo , "" | grep !@#;
+alias -1.000000 "";alias 1337.000000 "#stop; execifexists loadreplay.cfg";alias #stop "#off;blink skill 1 1;blink;#on;execute_command_every_frame -1.000000";
+blink execute_command_every_frame 30 -1 1337;

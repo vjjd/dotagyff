@@ -1,6 +1,6 @@
 {
   "recordMovie": {
-    "recordDuration" : 120,
+    "maxRecordDuration" : 300,
     "recordToDir": "test/testmovie",
     "specMode" : 3,
     "recordFPS": 60

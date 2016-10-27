@@ -1,8 +1,12 @@
 alias -3.000000 "";
-alias 4000.000000 "#stop; host_framerate <-frames->; demo_gototick 0 pause; blink execute_command_every_frame 10 -2 4001";
-alias 4001.000000 "#stop; demo_gototick <-startGameTick-> relative pause; blink execute_command_every_frame 10 -2 4002";
-alias 4002.000000 "#stop; demo_gototick <-recordStartTime-> relative pause; hideconsole; blink execute_command_every_frame 10 -2 4003;
-alias 4003.000000 "#stop; dota_spectator_hero_index <-heroIndex->; dota_spectator_mode <-specMode->; blink execute_command_every_frame 10 -2 4004"
-alias 4004.000000 "#stop; demo_resume; startmovie <-recordToDir->; blink execute_command_every_frame <-recordDuration-> -2 4005"
-alias 4005.000000 "#stop; endmovie; quit";
-#stop;blink execute_command_every_frame 5 -3 4000;
+alias 4000.000000 "#stop; host_framerate <-frames->; blink execute_command_every_frame 4 -3 4002";
+//alias 4001.000000 "#stop; demo_pause; blink execute_command_every_frame 4 -3 4002";
+alias 4002.000000 "#stop; demo_gototick 0 pause; blink execute_command_every_frame 4 -3 4003";
+alias 4003.000000 "#stop; demo_gototick <-startGameTick-> relative;  blink execute_command_every_frame 4 -3 4004";
+alias 4004.000000 "#stop; demo_gototick <-recordStartTime-> relative; blink execute_command_every_frame 4 -3 4005";
+alias 4005.000000 "#stop; hideconsole; blink execute_command_every_frame 4 -3 4006";
+alias 4006.000000 "#stop; dota_spectator_mode <-specMode->; blink execute_command_every_frame 4 -3 4007;
+alias 4007.000000 "#stop; dota_spectator_hero_index <-heroIndex->; blink execute_command_every_frame 4 -3 4008"
+alias 4008.000000 "#stop; demo_resume; startmovie <-recordToDir->; blink execute_command_every_frame <-maxRecordDuration-> -3 4009"
+alias 4009.000000 "#stop; endmovie; quit";
+#stop;blink execute_command_every_frame 4 -3 4000;

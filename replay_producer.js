@@ -15,9 +15,10 @@ let heroes = require('./heroes.json');
 // Variables
 let d2Dir = `/Users/vojjd/Library/Application\ Support/Steam/steamapps/common/dota\ 2\ beta/game`;
 let matchMeta = {
-    "id": 2721505211,
-    "heroName": "Queen of Pain",
-    "recordStartTime": 33300,
+    "id": 2734360480,
+    "heroName": "Pudge",
+    "recordStartTime": 11100,
+    "recordDuration": 20,
     "info": "",
     "heroIndex": ""
 };
@@ -26,9 +27,9 @@ let matchMeta = {
  * Unlink Dota Log File condump000.txt for Test
  */
 fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-  if(!err){
-      fs.unlinkSync(`${d2Dir}/dota/${config.dotaLogFile}`);
-  }
+    if(!err){
+        fs.unlinkSync(`${d2Dir}/dota/${config.dotaLogFile}`);
+    }
 });
 
 //Main Stage
@@ -58,9 +59,11 @@ function onD2Ready() {
 
                         setTimeout(calculateStartTick, 50000);
 
+                        terminateByFrame();
+
                         d2launch.on('close', (code) => {
-                            console.log(`Child Process Exited with Code: ${code}`);
-                            console.log(`Movie Recording is Done`);
+                            console.log(`Dota 2 Process Exited with Code: ${code}`);
+                            if(code === 0 || code === 137){ console.log(`Movie Recording is Done`) }
                         });
                 });
             }, onError);
@@ -112,6 +115,22 @@ function decompressBZ2(matchID) {
 }
 
 /**
+ * Get Player Index
+ * @param cb
+ */
+function getPlayerIndex(cb) {
+    heroes.heroes.forEach((heroInfo)=> {
+        if(matchMeta.heroName === heroInfo.localized_name){
+            matchMeta.info.match.players.forEach((playerInfo, index)=> {
+                if(playerInfo.hero_id === heroInfo.id){
+                    cb(index);
+                }
+            });
+        }
+    });
+}
+
+/**
  * Calculate Game Start Tick and Write startmovie.cfg
  */
 function calculateStartTick() {
@@ -134,7 +153,7 @@ function calculateStartTick() {
                         .replace(/<-heroIndex->/, `${matchMeta.heroIndex}`)
                         .replace(/<-specMode->/, `${config.recordMovie.specMode}`)
                         .replace(/<-recordToDir->/, `${config.recordMovie.recordToDir}`)
-                        .replace(/<-recordDuration->/, `${config.recordMovie.recordDuration}`),
+                        .replace(/<-maxRecordDuration->/, `${config.recordMovie.maxRecordDuration}`),
                     (err)=> {
                         if(err){ onError(err) }
                         console.log('Start Movie CFG was Set');
@@ -144,20 +163,21 @@ function calculateStartTick() {
     });
 }
 
-/**
- * Get Player Index
- * @param cb
- */
-function getPlayerIndex(cb) {
-    heroes.heroes.forEach((heroInfo)=> {
-        if(matchMeta.heroName === heroInfo.localized_name){
-            matchMeta.info.match.players.forEach((playerInfo, index)=> {
-                if(playerInfo.hero_id === heroInfo.id){
-                    cb(index);
-                }
-            });
-        }
-    });
+function terminateByFrame() {
+    fs.access(`${d2Dir}/dota/${config.recordMovie.recordToDir}${matchMeta.recordDuration * config.recordMovie.recordFPS}.tga`,
+        fs.constants.R_OK | fs.constants.W_OK,
+        (err)=> {
+            if(err){
+                setTimeout(terminateByFrame, 1000);
+            }else {
+                console.log('Frame exist -> Kill Dota 2');
+                const killDota = spawn(`pkill`, [`-9`, `dota2`]);
+
+                killDota.on('close', (code)=> {
+                    console.log(`pkill Dota Process Exited with Code: ${code}`);
+                });
+            }
+        });
 }
 
 /**
