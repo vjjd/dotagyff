@@ -15,9 +15,9 @@ let heroes = require('./heroes.json');
 // Variables
 let d2Dir = `/Users/vojjd/Library/Application\ Support/Steam/steamapps/common/dota\ 2\ beta/game`;
 let matchMeta = {
-    "id": 2734360480,
-    "heroName": "Pudge",
-    "recordStartTime": 11100,
+    "id": 2740558573,
+    "heroName": "Clockwerk",
+    "recordStartTime": 57750,
     "recordDuration": 20,
     "info": "",
     "heroIndex": ""
@@ -26,11 +26,26 @@ let matchMeta = {
 /**
  * Unlink Dota Log File condump000.txt for Test
  */
-fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-    if(!err){
-        fs.unlinkSync(`${d2Dir}/dota/${config.dotaLogFile}`);
-    }
-});
+unlinkLogAndFrames();
+
+function unlinkLogAndFrames() {
+    fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+        if(!err){
+            fs.unlink(`${d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
+                if(err){ onError(err) }
+                console.log(`Unlink ${config.dotaLogFile}`);
+            });
+        }
+    });
+    // fs.access(`${d2Dir}/dota/test`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+    //     if(!err){
+    //         fs.rmdir(`${d2Dir}/dota/test`, (err)=> {
+    //             if(err){ onError(err) }
+    //             console.log(`Remove Test Movie Dir`);
+    //         });
+    //     }
+    // });
+}
 
 //Main Stage
 Dota2.on("ready", onD2Ready);
@@ -59,7 +74,7 @@ function onD2Ready() {
 
                         setTimeout(calculateStartTick, 50000);
 
-                        terminateByFrame();
+                        terminateByFrame(`${d2Dir}/dota/${config.recordMovie.recordToDir}${matchMeta.recordDuration * config.recordMovie.recordFPS}.tga`);
 
                         d2launch.on('close', (code) => {
                             console.log(`Dota 2 Process Exited with Code: ${code}`);
@@ -163,21 +178,22 @@ function calculateStartTick() {
     });
 }
 
-function terminateByFrame() {
-    fs.access(`${d2Dir}/dota/${config.recordMovie.recordToDir}${matchMeta.recordDuration * config.recordMovie.recordFPS}.tga`,
-        fs.constants.R_OK | fs.constants.W_OK,
-        (err)=> {
-            if(err){
-                setTimeout(terminateByFrame, 1000);
-            }else {
-                console.log('Frame exist -> Kill Dota 2');
-                const killDota = spawn(`pkill`, [`-9`, `dota2`]);
+/**
+ * Terminate Dota 2 by Finite Frame
+ */
+function terminateByFrame(frame) {
+    fs.access(frame, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+        if(err){
+            setTimeout(()=> { terminateByFrame(frame) }, 1000);
+        }else {
+            console.log('Frame exist -> Kill Dota 2');
+            const killDota = spawn(`pkill`, [`-9`, `dota2`]);
 
-                killDota.on('close', (code)=> {
-                    console.log(`pkill Dota Process Exited with Code: ${code}`);
-                });
-            }
-        });
+            killDota.on('close', (code)=> {
+                console.log(`pkill Dota Process Exited with Code: ${code}`);
+            });
+        }
+    });
 }
 
 /**
