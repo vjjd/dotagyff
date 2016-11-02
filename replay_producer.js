@@ -1,7 +1,7 @@
 'use strict';
 
 // Dependencies
-let Dota2 = require('./steam_login'),
+let Dota2 = require('./modules/steam_login'),
     request = require('request'),
     Bunzip = require('seek-bzip'),
     config = require('./config'),
@@ -13,7 +13,6 @@ const loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
 let heroes = require('./heroes.json');
 
 // Variables
-let d2Dir = `/Users/vojjd/Library/Application\ Support/Steam/steamapps/common/dota\ 2\ beta/game`;
 let matchMeta = {
     "id": 2740558573,
     "heroName": "Clockwerk",
@@ -29,22 +28,37 @@ let matchMeta = {
 unlinkLogAndFrames();
 
 function unlinkLogAndFrames() {
-    fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+    fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
         if(!err){
-            fs.unlink(`${d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
+            fs.unlink(`${config.d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
                 if(err){ onError(err) }
                 console.log(`Unlink ${config.dotaLogFile}`);
             });
         }
     });
-    // fs.access(`${d2Dir}/dota/test`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-    //     if(!err){
-    //         fs.rmdir(`${d2Dir}/dota/test`, (err)=> {
-    //             if(err){ onError(err) }
-    //             console.log(`Remove Test Movie Dir`);
-    //         });
-    //     }
-    // });
+
+    let path = `${config.d2Dir}/dota/test`;
+
+    fs.access(path, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+        if(!err){
+            fs.readdir(path, (err, files)=> {
+                if(err){ onError(err) }
+
+                for(let file of files){
+                    fs.unlink(`${path}/${file}`, (err)=> {
+                        if(err){ onError(err) }
+                    });
+
+                    if(file === files[files.length - 1]){
+                        fs.rmdir(path, (err)=> {
+                            if(err){ onError(err) }
+                            console.log(`Remove Movie Dir`);
+                        });
+                    }
+                }
+            });
+        }
+    });
 }
 
 //Main Stage
@@ -66,15 +80,18 @@ function onD2Ready() {
         fetchReplay(matchMeta.id, matchMeta.info)
             .then(decompressBZ2, onError)
             .then(()=> {
-                fs.writeFile(`${d2Dir}/dota/cfg/loadreplay.cfg`,
+                fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
                     loadReplayTmpl.replace(/<-demoFileID->/, `replays/${matchMeta.id}`),
                     (err)=> {
                         if(err){ onError(err) }
-                        const d2launch = spawn(`${d2Dir}/dota.sh`, ['-console -exec autoexec']);
+                        const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
 
                         setTimeout(calculateStartTick, 50000);
 
-                        terminateByFrame(`${d2Dir}/dota/${config.recordMovie.recordToDir}${matchMeta.recordDuration * config.recordMovie.recordFPS}.tga`);
+
+
+                        terminateByFrame(`${config.d2Dir}/dota/${config.recordMovie.recordToDir}`+
+                            `${getTerminatedFrame()}.tga`);
 
                         d2launch.on('close', (code) => {
                             console.log(`Dota 2 Process Exited with Code: ${code}`);
@@ -119,7 +136,7 @@ function decompressBZ2(matchID) {
             if(err){ reject(err) }
             let data = Bunzip.decode(compressedData);
 
-            fs.writeFile(`${d2Dir}/dota/replays/${matchID}.dem`, data, (err)=> {
+            fs.writeFile(`${config.d2Dir}/dota/replays/${matchID}.dem`, data, (err)=> {
                 if(err){ reject(err) }
 
                 console.log(`${matchID}.dem.bz2 was Decompressed`);
@@ -149,18 +166,18 @@ function getPlayerIndex(cb) {
  * Calculate Game Start Tick and Write startmovie.cfg
  */
 function calculateStartTick() {
-    fs.access(`${d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+    fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
         if(err){
             setTimeout(calculateStartTick, 3000);
         }else{
-            fs.readFile(`${d2Dir}/dota/${config.dotaLogFile}`, 'utf-8', (err, data)=> {
+            fs.readFile(`${config.d2Dir}/dota/${config.dotaLogFile}`, 'utf-8', (err, data)=> {
                 if(err){ onError(err) }
                 let playbackTime = data.match(/playback_time: [0-9]*/i)[0].replace(/playback_time: /, '');
                 let startGameTick = (parseInt(playbackTime) - parseInt(matchMeta.info.match.duration) - 145) * 30;
 
                 console.log('Game Start Tick was Calculated');
 
-                fs.writeFile(`${d2Dir}/dota/cfg/startmovie.cfg`,
+                fs.writeFile(`${config.d2Dir}/dota/cfg/startmovie.cfg`,
                     startMovieTmpl
                         .replace(/<-frames->/, `${config.recordMovie.recordFPS}`)
                         .replace(/<-startGameTick->/, `${startGameTick}`)
@@ -194,6 +211,23 @@ function terminateByFrame(frame) {
             });
         }
     });
+}
+
+/**
+ * Calculate Terminated Frame
+ * @returns {string}
+ */
+function getTerminatedFrame(){
+    let serialFrame = `${matchMeta.recordDuration * config.recordMovie.recordFPS}`;
+    let maxZeros = 4 - serialFrame.length;
+    let zeros = '';
+
+    for(let i = 0; i < maxZeros; i++){
+        zeros += '0';
+        if(i == maxZeros - 1){
+            return zeros + serialFrame
+        }
+    }
 }
 
 /**
