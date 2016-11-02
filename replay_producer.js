@@ -5,7 +5,8 @@ let Dota2 = require('./modules/steam_login'),
     request = require('request'),
     Bunzip = require('seek-bzip'),
     config = require('./config'),
-    fs = require('fs');
+    fs = require('fs'),
+    redis = require('./modules/redis');
 
 const spawn = require('child_process').spawn;
 const startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8');
@@ -17,49 +18,13 @@ let matchMeta = {
     "id": 2740558573,
     "heroName": "Clockwerk",
     "recordStartTime": 57750,
-    "recordDuration": 20,
+    "recordDuration": 5,
     "info": "",
     "heroIndex": ""
 };
 
-/**
- * Unlink Dota Log File condump000.txt for Test
- */
 unlinkLogAndFrames();
 
-function unlinkLogAndFrames() {
-    fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-        if(!err){
-            fs.unlink(`${config.d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
-                if(err){ onError(err) }
-                console.log(`Unlink ${config.dotaLogFile}`);
-            });
-        }
-    });
-
-    let path = `${config.d2Dir}/dota/test`;
-
-    fs.access(path, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-        if(!err){
-            fs.readdir(path, (err, files)=> {
-                if(err){ onError(err) }
-
-                for(let file of files){
-                    fs.unlink(`${path}/${file}`, (err)=> {
-                        if(err){ onError(err) }
-                    });
-
-                    if(file === files[files.length - 1]){
-                        fs.rmdir(path, (err)=> {
-                            if(err){ onError(err) }
-                            console.log(`Remove Movie Dir`);
-                        });
-                    }
-                }
-            });
-        }
-    });
-}
 
 //Main Stage
 Dota2.on("ready", onD2Ready);
@@ -74,32 +39,43 @@ function onD2Ready() {
     Dota2.on("matchDetailsData", (matchId, matchData)=> {
         matchMeta.info = matchData;
         getPlayerIndex((index)=> {
-            matchMeta.heroIndex = index
+            matchMeta.heroIndex = index;
         });
 
-        fetchReplay(matchMeta.id, matchMeta.info)
-            .then(decompressBZ2, onError)
-            .then(()=> {
-                fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
-                    loadReplayTmpl.replace(/<-demoFileID->/, `replays/${matchMeta.id}`),
-                    (err)=> {
-                        if(err){ onError(err) }
-                        const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
-
-                        setTimeout(calculateStartTick, 50000);
-
-
-
-                        terminateByFrame(`${config.d2Dir}/dota/${config.recordMovie.recordToDir}`+
-                            `${getTerminatedFrame()}.tga`);
-
-                        d2launch.on('close', (code) => {
-                            console.log(`Dota 2 Process Exited with Code: ${code}`);
-                            if(code === 0 || code === 137){ console.log(`Movie Recording is Done`) }
-                        });
-                });
-            }, onError);
+        redis.multi().keys(`*${matchMeta.id}`).execAsync()
+            .then((res)=> {
+                console.log(res);
+                if(res[0].length == 0){
+                    redis.set(`replay:${matchMeta.id}`, '');
+                    fetchReplay(matchMeta.id, matchMeta.info)
+                        .then(decompressBZ2, onError)
+                        .then(dotaAction, onError);
+                }else {
+                    console.log('Dota action now');
+                    dotaAction();
+                }
+            })
     });
+}
+
+/**
+ * Action with Dota 2
+ */
+function dotaAction() {
+    fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
+        loadReplayTmpl.replace(/<-demoFileID->/, `replays/${matchMeta.id}`),
+        (err)=> {
+            if(err){ onError(err) }
+            const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
+
+            setTimeout(calculateStartTick, 50000);
+            terminateByFrame(`${config.d2Dir}/dota/${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`);
+
+            d2launch.on('close', (code) => {
+                console.log(`Dota 2 Process Exited with Code: ${code}`);
+                if(code === 0 || code === 137){ console.log(`Movie Recording is Done`) }
+            });
+        });
 }
 
 /**
@@ -148,18 +124,20 @@ function decompressBZ2(matchID) {
 
 /**
  * Get Player Index
- * @param cb
+ * @returns {Promise}
  */
 function getPlayerIndex(cb) {
-    heroes.heroes.forEach((heroInfo)=> {
-        if(matchMeta.heroName === heroInfo.localized_name){
-            matchMeta.info.match.players.forEach((playerInfo, index)=> {
-                if(playerInfo.hero_id === heroInfo.id){
-                    cb(index);
-                }
-            });
-        }
-    });
+    // return new Promise((resolve)=> {
+        heroes.heroes.forEach((heroInfo)=> {
+            if(matchMeta.heroName === heroInfo.localized_name){
+                matchMeta.info.match.players.forEach((playerInfo, index)=> {
+                    if(playerInfo.hero_id === heroInfo.id){
+                        cb(index);
+                    }
+                });
+            }
+        });
+    // });
 }
 
 /**
@@ -236,4 +214,41 @@ function getTerminatedFrame(){
  */
 function onError(err) {
     console.log(err);
+}
+
+/**
+ * Unlink Dota Log File condump000.txt for Test
+ */
+function unlinkLogAndFrames() {
+    fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+        if(!err){
+            fs.unlink(`${config.d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
+                if(err){ onError(err) }
+                console.log(`Unlink ${config.dotaLogFile}`);
+            });
+        }
+    });
+
+    let path = `${config.d2Dir}/dota/test`;
+
+    fs.access(path, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+        if(!err){
+            fs.readdir(path, (err, files)=> {
+                if(err){ onError(err) }
+
+                for(let file of files){
+                    fs.unlink(`${path}/${file}`, (err)=> {
+                        if(err){ onError(err) }
+                    });
+
+                    if(file === files[files.length - 1]){
+                        fs.rmdir(path, (err)=> {
+                            if(err){ onError(err) }
+                            console.log(`Remove Movie Dir`);
+                        });
+                    }
+                }
+            });
+        }
+    });
 }
