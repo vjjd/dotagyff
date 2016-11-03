@@ -15,16 +15,21 @@ let heroes = require('./heroes.json');
 
 // Variables
 let matchMeta = {
-    "id": 2740558573,
-    "heroName": "Clockwerk",
-    "recordStartTime": 57750,
+    "players": [],
+    "duration": '',
+    "cluster": '',
+    "replay_salt": ''
+};
+
+let task = {
+    "heroName": "Sniper",
+    "id": 2742558168,
+    "recordStartTime": 111600,
     "recordDuration": 5,
-    "info": "",
-    "heroIndex": ""
+    "heroIndex": "",
 };
 
 unlinkLogAndFrames();
-
 
 //Main Stage
 Dota2.on("ready", onD2Ready);
@@ -35,26 +40,78 @@ Dota2.on("ready", onD2Ready);
 function onD2Ready() {
     console.log("Dota2 is Ready");
 
-    Dota2.requestMatchDetails(matchMeta.id);
-    Dota2.on("matchDetailsData", (matchId, matchData)=> {
-        matchMeta.info = matchData;
-        getPlayerIndex((index)=> {
-            matchMeta.heroIndex = index;
-        });
+    redis.getAsync(`replay:${task.id}`)
+        .then((res)=> {
+            if(res){
+                matchMeta = JSON.parse(res);
 
-        redis.multi().keys(`*${matchMeta.id}`).execAsync()
-            .then((res)=> {
-                console.log(res);
-                if(res[0].length == 0){
-                    redis.set(`replay:${matchMeta.id}`, '');
-                    fetchReplay(matchMeta.id, matchMeta.info)
-                        .then(decompressBZ2, onError)
-                        .then(dotaAction, onError);
-                }else {
-                    console.log('Dota action now');
-                    dotaAction();
-                }
-            })
+                getPlayerIndex(matchMeta)
+                    .then((index)=> {
+                        task.heroIndex = index;
+                        dotaAction();
+                    });
+                getMatchDetails()
+                    .then((matchData)=> {
+                        matchMeta.players = matchData.match.players.map((player)=> {
+                            return {
+                                "account_id": player.account_id,
+                                "hero_id": player.hero_id,
+                                "player_name": player.player_name,
+                                "player_slot": player.player_slot
+                            };
+                        });
+                        matchMeta.replay_salt = matchData.match.replay_salt;
+                        matchMeta.cluster = matchData.match.cluster;
+                        matchMeta.duration = matchData.match.duration;
+
+                        return matchMeta;
+                    })
+                    .then((matchMeta)=> {
+                        redis.set(`replay:${task.id}`, JSON.stringify(matchMeta), (err)=> {
+                            if(err){ onError(err) }
+                        });
+                        return matchMeta;
+                    })
+                    .then(getPlayerIndex)
+                    .then((index)=> {
+                        task.heroIndex = index;
+                        return matchMeta;
+                    })
+                    .then(fetchReplay, onError)
+                    .then(decompressBZ2, onError)
+                    .then(dotaAction, onError);
+            }
+        })
+}
+
+/**
+ * Fetch Match Details
+ * @returns {Promise}
+ */
+function  getMatchDetails() {
+    return new Promise((resolve)=> {
+        Dota2.requestMatchDetails(task.id);
+        Dota2.on("matchDetailsData", (matchId, matchData)=> {
+            resolve(matchData);
+        });
+    });
+}
+
+/**
+ * Get Player Index
+ * @returns {Promise}
+ */
+function getPlayerIndex(meta) {
+    return new Promise((resolve)=> {
+        heroes.heroes.forEach((heroInfo)=> {
+            if(task.heroName === heroInfo.localized_name){
+                meta.players.forEach((playerInfo, index)=> {
+                    if(playerInfo.hero_id === heroInfo.id){
+                        resolve(index);
+                    }
+                });
+            }
+        });
     });
 }
 
@@ -62,30 +119,40 @@ function onD2Ready() {
  * Action with Dota 2
  */
 function dotaAction() {
-    fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
-        loadReplayTmpl.replace(/<-demoFileID->/, `replays/${matchMeta.id}`),
-        (err)=> {
-            if(err){ onError(err) }
-            const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
+    // return new Promise((resolve, reject)=> {
+        fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
+            loadReplayTmpl.replace(/<-demoFileID->/, `replays/${task.id}`),
+            (err)=> {
+                if(err){ onError(err) }
+                const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
 
-            setTimeout(calculateStartTick, 50000);
-            terminateByFrame(`${config.d2Dir}/dota/${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`);
+                setTimeout(calculateStartTick, 50000);
 
-            d2launch.on('close', (code) => {
-                console.log(`Dota 2 Process Exited with Code: ${code}`);
-                if(code === 0 || code === 137){ console.log(`Movie Recording is Done`) }
+                let terminatedFrame = `${config.d2Dir}/dota/${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`;
+                console.log(`Terminate Movie Recording by Frame: ${terminatedFrame}`);
+                terminateByFrame(terminatedFrame);
+
+                d2launch.on('close', (code) => {
+                    console.log(`Dota 2 Process Exited with Code: ${code}`);
+                    if (code === 0 || code === 137) { console.log(`Movie Recording is Done`) }
+                    //     resolve() }
+                    // else{ reject() }
+                });
             });
-        });
+    // })
 }
 
 /**
  * Fetch Replay Data for Clip Recoding
+ * @param meta (match)
+ * @returns {Promise}
  */
-function fetchReplay(matchID, matchData) {
+function fetchReplay(meta) {
     return new Promise((resolve, reject)=> {
+        let matchID = task.id;
         let reqStream = request
-            .get(`http://replay${matchData.match.cluster}.valve.net/570/`+
-                `${matchID}_${matchData.match.replay_salt}.dem.bz2?v=1`)
+            .get(`http://replay${meta.cluster}.valve.net/570/`+
+                `${matchID}_${meta.replay_salt}.dem.bz2?v=1`)
             .on('error', (err)=>{
                 if(err){ reject(err) }
             })
@@ -96,18 +163,20 @@ function fetchReplay(matchID, matchData) {
 
         reqStream.on('finish', ()=>{
             console.log(`Replay #${matchID} was Downloaded`);
-            resolve(matchID);
+            resolve(meta);
         })
     })
 }
 
 /**
  * Decompress dem.bz2 Files
- * @param matchID
+ * @param meta (match)
  * @returns {Promise}
  */
-function decompressBZ2(matchID) {
+function decompressBZ2(meta) {
     return new Promise((resolve, reject)=> {
+        let matchID = task.id;
+
         fs.readFile(`${config.bz2}/${matchID}.dem.bz2`, (err, compressedData)=> {
             if(err){ reject(err) }
             let data = Bunzip.decode(compressedData);
@@ -123,24 +192,6 @@ function decompressBZ2(matchID) {
 }
 
 /**
- * Get Player Index
- * @returns {Promise}
- */
-function getPlayerIndex(cb) {
-    // return new Promise((resolve)=> {
-        heroes.heroes.forEach((heroInfo)=> {
-            if(matchMeta.heroName === heroInfo.localized_name){
-                matchMeta.info.match.players.forEach((playerInfo, index)=> {
-                    if(playerInfo.hero_id === heroInfo.id){
-                        cb(index);
-                    }
-                });
-            }
-        });
-    // });
-}
-
-/**
  * Calculate Game Start Tick and Write startmovie.cfg
  */
 function calculateStartTick() {
@@ -151,16 +202,16 @@ function calculateStartTick() {
             fs.readFile(`${config.d2Dir}/dota/${config.dotaLogFile}`, 'utf-8', (err, data)=> {
                 if(err){ onError(err) }
                 let playbackTime = data.match(/playback_time: [0-9]*/i)[0].replace(/playback_time: /, '');
-                let startGameTick = (parseInt(playbackTime) - parseInt(matchMeta.info.match.duration) - 145) * 30;
+                let startGameTick = (parseInt(playbackTime) - parseInt(matchMeta.duration) - 145) * 30;
 
-                console.log('Game Start Tick was Calculated');
+                console.log(`Game Start Tick was Calculated: ${startGameTick}`);
 
                 fs.writeFile(`${config.d2Dir}/dota/cfg/startmovie.cfg`,
                     startMovieTmpl
                         .replace(/<-frames->/, `${config.recordMovie.recordFPS}`)
                         .replace(/<-startGameTick->/, `${startGameTick}`)
-                        .replace(/<-recordStartTime->/, `${matchMeta.recordStartTime}`)
-                        .replace(/<-heroIndex->/, `${matchMeta.heroIndex}`)
+                        .replace(/<-recordStartTime->/, `${task.recordStartTime}`)
+                        .replace(/<-heroIndex->/, `${task.heroIndex}`)
                         .replace(/<-specMode->/, `${config.recordMovie.specMode}`)
                         .replace(/<-recordToDir->/, `${config.recordMovie.recordToDir}`)
                         .replace(/<-maxRecordDuration->/, `${config.recordMovie.maxRecordDuration}`),
@@ -196,7 +247,10 @@ function terminateByFrame(frame) {
  * @returns {string}
  */
 function getTerminatedFrame(){
-    let serialFrame = `${matchMeta.recordDuration * config.recordMovie.recordFPS}`;
+    let serialFrame = `${task.recordDuration * config.recordMovie.recordFPS}`;
+
+    if(serialFrame.length == 4){ return serialFrame }
+
     let maxZeros = 4 - serialFrame.length;
     let zeros = '';
 
@@ -213,7 +267,7 @@ function getTerminatedFrame(){
  * @param err
  */
 function onError(err) {
-    console.log(err);
+    console.log(`Error Logger: ${err}`);
 }
 
 /**

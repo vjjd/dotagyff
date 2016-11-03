@@ -2,7 +2,7 @@
 
 const config = {
   recordMovie: {
-    maxRecordDuration : 300,
+    maxRecordDuration : 350,
     recordToDir: 'test/testmovie',
     specMode : 3,
     recordFPS: 60
