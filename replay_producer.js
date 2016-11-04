@@ -1,7 +1,7 @@
 'use strict';
 
-// Dependencies
-let Dota2 = require('./modules/steam_login'),
+let
+    Dota2 = require('./modules/steam_login'),
     request = require('request'),
     Bunzip = require('seek-bzip'),
     config = require('./config'),
@@ -9,74 +9,58 @@ let Dota2 = require('./modules/steam_login'),
     redis = require('./modules/redis'),
     heroes = require('./heroes.json');
 
-const spawn = require('child_process').spawn;
-const startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8');
-const loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
-
-// Variables
-let matchMeta = {
-    "players": [],
-    "duration": '',
-    "cluster": '',
-    "replay_salt": ''
-};
+const
+    spawn = require('child_process').spawn,
+    startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8'),
+    loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
 
 let task = {
-    "heroName": "Sniper",
-    "id": 2742558168,
-    "recordStartTime": 111600,
-    "recordDuration": 5,
-    "heroIndex": "",
-};
+        "heroName": "Sniper",
+        "id": 2742558168,
+        "recordStartTime": 111600,
+        "recordDuration": 5,
+        "heroIndex": "",
+        "status": "during",
 
-unlinkLogAndFrames();
+        "matchMeta": {
+            "players": [],
+            "duration": '',
+            "cluster": '',
+            "replay_salt": ''
+        }
+    };
 
-redis.getAsync(`replay:${task.id}`)
-    .then((res)=> {
-        if (res) {
-            matchMeta = JSON.parse(res);
+Dota2.on("ready", onD2Ready);
 
-            getPlayerIndex(matchMeta).then((index)=> {
-                task.heroIndex = index;
-                dotaAction();
-            });
-        } else { Dota2.on("ready", onD2Ready) }
-    });
-
-/**
- * Dota2 Client on Ready
- */
 function onD2Ready() {
-    getMatchDetails()
-        .then((matchData)=> {
-            matchMeta.players = matchData.match.players.map((player)=> {
-                return {
-                    "account_id": player.account_id,
-                    "hero_id": player.hero_id,
-                    "player_name": player.player_name,
-                    "player_slot": player.player_slot
-                };
-            });
-            matchMeta.replay_salt = matchData.match.replay_salt;
-            matchMeta.cluster = matchData.match.cluster;
-            matchMeta.duration = matchData.match.duration;
+    redis.getAsync(`replay:${task.id}`)
+        .then((res)=> {
+            if (res) {
+                task.matchMeta = JSON.parse(res);
 
-            return matchMeta;
-        })
-        .then((matchMeta)=> {
-            redis.set(`replay:${task.id}`, JSON.stringify(matchMeta), (err)=> {
-                if(err){ onError(err) }
-            });
-            return matchMeta;
-        })
-        .then(getPlayerIndex)
-        .then((index)=> {
-            task.heroIndex = index;
-            return matchMeta;
-        })
-        .then(fetchReplay, onError)
-        .then(decompressBZ2, onError)
-        .then(dotaAction, onError);
+                getPlayerIndex().then((index)=> {
+                    task.heroIndex = index;
+                    dotaAction();
+                });
+            } else {
+                getMatchDetails()
+                    .then(()=> {
+                        redis.set(`replay:${task.id}`, JSON.stringify(task.matchMeta), (err)=> {
+                            if(err){ onError(err) }
+                        });
+                    })
+                    .then(getPlayerIndex)
+                    .then((index)=> {
+                        task.heroIndex = index;
+                    })
+                    .then(fetchReplay, onError)
+                    .then(decompressBZ2, onError)
+                    .then(dotaAction, onError)
+                    .then(()=>{
+                        console.log(`Task Status: ${task.status}`);
+                    }, onError);
+            }
+        });
 }
 
 /**
@@ -87,7 +71,19 @@ function  getMatchDetails() {
     return new Promise((resolve)=> {
         Dota2.requestMatchDetails(task.id);
         Dota2.on("matchDetailsData", (matchId, matchData)=> {
-            resolve(matchData);
+            task.matchMeta.players = matchData.match.players.map((player)=> {
+                return {
+                    "account_id": player.account_id,
+                    "hero_id": player.hero_id,
+                    "player_name": player.player_name,
+                    "player_slot": player.player_slot
+                };
+            });
+            task.matchMeta.replay_salt = matchData.match.replay_salt;
+            task.matchMeta.cluster = matchData.match.cluster;
+            task.matchMeta.duration = matchData.match.duration;
+
+            resolve();
         });
     });
 }
@@ -96,11 +92,11 @@ function  getMatchDetails() {
  * Get Player Index
  * @returns {Promise}
  */
-function getPlayerIndex(meta) {
+function getPlayerIndex() {
     return new Promise((resolve)=> {
         heroes.heroes.forEach((heroInfo)=> {
             if(task.heroName === heroInfo.localized_name){
-                meta.players.forEach((playerInfo, index)=> {
+                task.matchMeta.players.forEach((playerInfo, index)=> {
                     if(playerInfo.hero_id === heroInfo.id){
                         resolve(index);
                     }
@@ -111,43 +107,15 @@ function getPlayerIndex(meta) {
 }
 
 /**
- * Action with Dota 2
- */
-function dotaAction() {
-    // return new Promise((resolve, reject)=> {
-        fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
-            loadReplayTmpl.replace(/<-demoFileID->/, `replays/${task.id}`),
-            (err)=> {
-                if(err){ onError(err) }
-                const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
-
-                setTimeout(calculateStartTick, 50000);
-
-                let terminatedFrame = `${config.d2Dir}/dota/${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`;
-                console.log(`Terminate Movie Recording by Frame: ${terminatedFrame}`);
-                terminateByFrame(terminatedFrame);
-
-                d2launch.on('close', (code) => {
-                    console.log(`Dota 2 Process Exited with Code: ${code}`);
-                    if (code === 0 || code === 137) { console.log(`Movie Recording is Done`) }
-                    //     resolve() }
-                    // else{ reject() }
-                });
-            });
-    // })
-}
-
-/**
  * Fetch Replay Data for Clip Recoding
- * @param meta (match)
  * @returns {Promise}
  */
-function fetchReplay(meta) {
+function fetchReplay() {
     return new Promise((resolve, reject)=> {
         let matchID = task.id;
         let reqStream = request
-            .get(`http://replay${meta.cluster}.valve.net/570/`+
-                `${matchID}_${meta.replay_salt}.dem.bz2?v=1`)
+            .get(`http://replay${task.matchMeta.cluster}.valve.net/570/`+
+                `${matchID}_${task.matchMeta.replay_salt}.dem.bz2?v=1`)
             .on('error', (err)=>{
                 if(err){ reject(err) }
             })
@@ -186,6 +154,38 @@ function decompressBZ2() {
 }
 
 /**
+ * Action with Dota 2
+ */
+function dotaAction() {
+    return new Promise((resolve, reject)=> {
+    fs.writeFile(`${config.d2Dir}/dota/cfg/loadreplay.cfg`,
+        loadReplayTmpl.replace(/<-demoFileID->/, `replays/${task.id}`),
+        (err)=> {
+            if(err){ onError(err) }
+            unlinkLog()
+                .then(unlinkFrames, onError)
+                .then(()=> {
+                    const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
+
+                    setTimeout(calculateStartTick, 50000);
+                    terminateByFrame(`${config.d2Dir}/dota/`+`${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`);
+                    console.log(`Movie Recording will be Terminate by Frame#${getTerminatedFrame()}.tga`);
+
+                    d2launch.on('close', (code) => {
+                        console.log(`Dota 2 Process Exited with Code: ${code}`);
+                        if (code === 0 || code === 137) {
+                            console.log(`Movie Recording is Done`);
+                            resolve();
+                        }else{
+                            reject(`Dota 2 Terminated with Code: ${code}`)
+                        }
+                });
+            });
+        });
+    });
+}
+
+/**
  * Calculate Game Start Tick and Write startmovie.cfg
  */
 function calculateStartTick() {
@@ -196,7 +196,7 @@ function calculateStartTick() {
             fs.readFile(`${config.d2Dir}/dota/${config.dotaLogFile}`, 'utf-8', (err, data)=> {
                 if(err){ onError(err) }
                 let playbackTime = data.match(/playback_time: [0-9]*/i)[0].replace(/playback_time: /, '');
-                let startGameTick = (parseInt(playbackTime) - parseInt(matchMeta.duration) - 145) * 30;
+                let startGameTick = (parseInt(playbackTime) - parseInt(task.matchMeta.duration) - 145) * 30;
 
                 console.log(`Game Start Tick was Calculated: ${startGameTick}`);
 
@@ -257,46 +257,69 @@ function getTerminatedFrame(){
 }
 
 /**
+ * Unlink Dota Log File condump000.txt for Test
+ */
+function unlinkLog(){
+    return new Promise((resolve, reject)=> {
+        fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+            if(err) {
+                resolve()
+            }else {
+                fs.unlink(`${config.d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
+                    if(err){ reject(err) }
+                    console.log(`Unlink ${config.dotaLogFile}`);
+                    resolve();
+                });
+            }
+        });
+    });
+}
+
+/**
+ * Unlink Movie Frames
+ * @returns {Promise}
+ */
+function unlinkFrames() {
+    return new Promise((resolve, reject)=> {
+        let path = `${config.d2Dir}/dota/test`;
+
+        function rmDir(path) {
+            fs.rmdir(path, (err)=> {
+                if(err){ reject (err) }
+                console.log(`Remove Movie Dir`);
+                resolve();
+            });
+        }
+
+        fs.access(path, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
+            if(err){
+                resolve()
+            }else {
+                fs.readdir(path, (err, files)=> {
+                    if(err){ reject(err) }
+                    if(files.length){
+                        for(let file of files){
+                            fs.unlink(`${path}/${file}`, (err)=> {
+                                if(err){ reject(err) }
+                            });
+
+                            if(file == files[files.length - 1]){
+                                rmDir(path);
+                            }
+                        }
+                    }else {
+                        rmDir(path);
+                    }
+                });
+            }
+        });
+    });
+}
+
+/**
  * Error Logger
  * @param err
  */
 function onError(err) {
     console.log(`Error Logger: ${err}`);
-}
-
-/**
- * Unlink Dota Log File condump000.txt for Test
- */
-function unlinkLogAndFrames() {
-    fs.access(`${config.d2Dir}/dota/${config.dotaLogFile}`, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-        if(!err){
-            fs.unlink(`${config.d2Dir}/dota/${config.dotaLogFile}`, (err)=> {
-                if(err){ onError(err) }
-                console.log(`Unlink ${config.dotaLogFile}`);
-            });
-        }
-    });
-
-    let path = `${config.d2Dir}/dota/test`;
-
-    fs.access(path, fs.constants.R_OK | fs.constants.W_OK, (err)=> {
-        if(!err){
-            fs.readdir(path, (err, files)=> {
-                if(err){ onError(err) }
-
-                for(let file of files){
-                    fs.unlink(`${path}/${file}`, (err)=> {
-                        if(err){ onError(err) }
-                    });
-
-                    if(file === files[files.length - 1]){
-                        fs.rmdir(path, (err)=> {
-                            if(err){ onError(err) }
-                            console.log(`Remove Movie Dir`);
-                        });
-                    }
-                }
-            });
-        }
-    });
 }
