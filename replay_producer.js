@@ -6,12 +6,12 @@ let Dota2 = require('./modules/steam_login'),
     Bunzip = require('seek-bzip'),
     config = require('./config'),
     fs = require('fs'),
-    redis = require('./modules/redis');
+    redis = require('./modules/redis'),
+    heroes = require('./heroes.json');
 
 const spawn = require('child_process').spawn;
 const startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8');
 const loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
-let heroes = require('./heroes.json');
 
 // Variables
 let matchMeta = {
@@ -31,57 +31,52 @@ let task = {
 
 unlinkLogAndFrames();
 
-//Main Stage
-Dota2.on("ready", onD2Ready);
+redis.getAsync(`replay:${task.id}`)
+    .then((res)=> {
+        if (res) {
+            matchMeta = JSON.parse(res);
+
+            getPlayerIndex(matchMeta).then((index)=> {
+                task.heroIndex = index;
+                dotaAction();
+            });
+        } else { Dota2.on("ready", onD2Ready) }
+    });
 
 /**
  * Dota2 Client on Ready
  */
 function onD2Ready() {
-    console.log("Dota2 is Ready");
+    getMatchDetails()
+        .then((matchData)=> {
+            matchMeta.players = matchData.match.players.map((player)=> {
+                return {
+                    "account_id": player.account_id,
+                    "hero_id": player.hero_id,
+                    "player_name": player.player_name,
+                    "player_slot": player.player_slot
+                };
+            });
+            matchMeta.replay_salt = matchData.match.replay_salt;
+            matchMeta.cluster = matchData.match.cluster;
+            matchMeta.duration = matchData.match.duration;
 
-    redis.getAsync(`replay:${task.id}`)
-        .then((res)=> {
-            if(res){
-                matchMeta = JSON.parse(res);
-
-                getPlayerIndex(matchMeta)
-                    .then((index)=> {
-                        task.heroIndex = index;
-                        dotaAction();
-                    });
-                getMatchDetails()
-                    .then((matchData)=> {
-                        matchMeta.players = matchData.match.players.map((player)=> {
-                            return {
-                                "account_id": player.account_id,
-                                "hero_id": player.hero_id,
-                                "player_name": player.player_name,
-                                "player_slot": player.player_slot
-                            };
-                        });
-                        matchMeta.replay_salt = matchData.match.replay_salt;
-                        matchMeta.cluster = matchData.match.cluster;
-                        matchMeta.duration = matchData.match.duration;
-
-                        return matchMeta;
-                    })
-                    .then((matchMeta)=> {
-                        redis.set(`replay:${task.id}`, JSON.stringify(matchMeta), (err)=> {
-                            if(err){ onError(err) }
-                        });
-                        return matchMeta;
-                    })
-                    .then(getPlayerIndex)
-                    .then((index)=> {
-                        task.heroIndex = index;
-                        return matchMeta;
-                    })
-                    .then(fetchReplay, onError)
-                    .then(decompressBZ2, onError)
-                    .then(dotaAction, onError);
-            }
+            return matchMeta;
         })
+        .then((matchMeta)=> {
+            redis.set(`replay:${task.id}`, JSON.stringify(matchMeta), (err)=> {
+                if(err){ onError(err) }
+            });
+            return matchMeta;
+        })
+        .then(getPlayerIndex)
+        .then((index)=> {
+            task.heroIndex = index;
+            return matchMeta;
+        })
+        .then(fetchReplay, onError)
+        .then(decompressBZ2, onError)
+        .then(dotaAction, onError);
 }
 
 /**
@@ -163,17 +158,16 @@ function fetchReplay(meta) {
 
         reqStream.on('finish', ()=>{
             console.log(`Replay #${matchID} was Downloaded`);
-            resolve(meta);
+            resolve();
         })
     })
 }
 
 /**
  * Decompress dem.bz2 Files
- * @param meta (match)
  * @returns {Promise}
  */
-function decompressBZ2(meta) {
+function decompressBZ2() {
     return new Promise((resolve, reject)=> {
         let matchID = task.id;
 
