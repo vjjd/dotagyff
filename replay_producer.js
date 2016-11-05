@@ -7,7 +7,8 @@ let
     config = require('./config'),
     fs = require('fs'),
     redis = require('./modules/redis'),
-    heroes = require('./heroes.json');
+    heroes = require('./heroes.json'),
+    ffmpeg = require('fluent-ffmpeg');
 
 const
     spawn = require('child_process').spawn,
@@ -17,8 +18,8 @@ const
 let task = {
         "heroName": "Sniper",
         "id": 2742558168,
-        "recordStartTime": 111600,
-        "recordDuration": 5,
+        "recordStartTime": 111300,
+        "recordDuration": 15,
         "heroIndex": "",
         "status": "during",
 
@@ -35,19 +36,19 @@ Dota2.on("ready", onD2Ready);
 function onD2Ready() {
     redis.getAsync(`replay:${task.id}`)
         .then((res)=> {
-            if (res) {
+            if(res){
                 task.matchMeta = JSON.parse(res);
 
-                getPlayerIndex().then((index)=> {
-                    task.heroIndex = index;
-                    dotaAction();
-                });
-            } else {
+                getPlayerIndex()
+                    .then((index)=> {
+                        task.heroIndex = index;
+                        dotaAction();
+                    });
+            }else {
                 getMatchDetails()
                     .then(()=> {
-                        redis.set(`replay:${task.id}`, JSON.stringify(task.matchMeta), (err)=> {
-                            if(err){ onError(err) }
-                        });
+                        redis.set(`replay:${task.id}`,
+                            JSON.stringify(task.matchMeta));
                     })
                     .then(getPlayerIndex)
                     .then((index)=> {
@@ -55,10 +56,7 @@ function onD2Ready() {
                     })
                     .then(fetchReplay, onError)
                     .then(decompressBZ2, onError)
-                    .then(dotaAction, onError)
-                    .then(()=>{
-                        console.log(`Task Status: ${task.status}`);
-                    }, onError);
+                    .then(dotaAction, onError);
             }
         });
 }
@@ -175,7 +173,19 @@ function dotaAction() {
                         console.log(`Dota 2 Process Exited with Code: ${code}`);
                         if (code === 0 || code === 137) {
                             console.log(`Movie Recording is Done`);
-                            resolve();
+
+                            console.log('start ffpmeg');
+                            new ffmpeg(`${config.d2Dir}/dota/test/testmovie%4d.tga`)
+                                .withInputFps('60')
+                                .withVideoCodec('libvpx')
+                                .size(('70%'))
+                                .addOption(['-b:v 0', '-crf 22'])
+                                .saveToFile('/Users/vojjd/Desktop/SniperMovie.webm')
+                                .on('end', ()=> {
+                                    task.status = 'done';
+                                    console.log(`End. Task Status: ${task.status}`);
+                                    resolve();
+                                });
                         }else{
                             reject(`Dota 2 Terminated with Code: ${code}`)
                         }
