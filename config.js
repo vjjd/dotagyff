@@ -15,6 +15,8 @@ const config = {
     prefix: 'dotagyff:'
   },
 
+  secret: 'ElenaGolovach',
+  port: 3000,
   bz2: './tmp/bz2',
   dem: './tmp/dem',
   dotaLogFile: 'condump000.txt',

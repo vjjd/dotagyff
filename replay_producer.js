@@ -12,53 +12,127 @@ let
 
 const
     spawn = require('child_process').spawn,
+    crypto = require('crypto'),
     startMovieTmpl = fs.readFileSync('./templates/startmovie', 'utf-8'),
     loadReplayTmpl = fs.readFileSync('./templates/loadreplay', 'utf-8');
 
 let task = {
-        "heroName": "Sniper",
-        "id": 2742558168,
-        "recordStartTime": 111300,
-        "recordDuration": 15,
-        "heroIndex": "",
-        "status": "during",
+    "heroName": "Faceless Void",
+    "id": 2752071280,
+    "recordStartTime": 66750,
+    "recordDuration": 15,
+    "heroIndex": "",
+    "status": "during",
+    "hash": "",
 
-        "matchMeta": {
-            "players": [],
-            "duration": '',
-            "cluster": '',
-            "replay_salt": ''
-        }
-    };
+    "matchMeta": {
+        "players": [],
+        "duration": '',
+        "cluster": '',
+        "replay_salt": ''
+    }
+};
 
-Dota2.on("ready", onD2Ready);
+start();
 
-function onD2Ready() {
-    redis.getAsync(`replay:${task.id}`)
-        .then((res)=> {
-            if(res){
-                task.matchMeta = JSON.parse(res);
+function start() {
+    calculateTaskHash().then(()=> {
+        redis.getAsync(`replay:${task.id}`)
+            .then((res)=> {
+                if (res) {
+                    task.matchMeta = JSON.parse(res);
 
-                getPlayerIndex()
-                    .then((index)=> {
-                        task.heroIndex = index;
-                        dotaAction();
-                    });
-            }else {
-                getMatchDetails()
-                    .then(()=> {
-                        redis.set(`replay:${task.id}`,
-                            JSON.stringify(task.matchMeta));
-                    })
-                    .then(getPlayerIndex)
-                    .then((index)=> {
-                        task.heroIndex = index;
-                    })
-                    .then(fetchReplay, onError)
-                    .then(decompressBZ2, onError)
-                    .then(dotaAction, onError);
-            }
-        });
+                    getPlayerIndex()
+                        .then((index)=> {
+                            task.heroIndex = index;
+                            dotaAction();
+                        });
+                } else {
+                    Dota2.on("ready", onD2Ready)
+                }
+            });
+    });
+
+    function onD2Ready() {
+        getMatchDetails()
+            .then(()=> {
+                redis.set(`replay:${task.id}`,
+                    JSON.stringify(task.matchMeta));
+            })
+            .then(getPlayerIndex)
+            .then((index)=> {
+                task.heroIndex = index;
+            })
+            .then(fetchReplay, onError)
+            .then(decompressBZ2, onError)
+            .then(dotaAction, onError)
+            .then(()=> {
+                let optionGetKey = {
+                    method: 'POST',
+                    url: 'https://api.gfycat.com/v1/gfycats',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    data: {
+                        "noMd5" : "false", //def:true
+                        "noResize" : "true",
+                        "captions": [
+                            {
+                                "startSeconds":0,
+                                "duration": 15,
+                                "text": "caption"
+                            }
+                        ]
+                    },
+                };
+
+                let path = '/Users/vojjd/Desktop';
+                let name = task.hash;
+                console.log(`Name: ${name}`);
+
+                request.post(optionGetKey, (err, res, body)=> {
+                    if (!err && res.statusCode == 200) {
+                        console.log(`Receive result: ${body}`);
+
+                        let newName = JSON.parse(body).gfyname;
+                        console.log(`New name: ${newName}`);
+
+                        fs.rename(`${path}/${name}.mp4`, `${path}/${newName}`, (err)=> {
+                            if (err) { console.log(`Error Logger: ${err}`) }
+
+                            console.log(`${path}/${newName}`);
+                            const curlReq = spawn(`curl`, [`-i`, `https://filedrop.gfycat.com`, `--upload-file`, `${path}/${newName}`]);
+
+                            curlReq.stdout.on('data', (data)=> { console.log(`out: ${data}`) });
+                            //curlReq.stderr.on('data', (data)=> { console.log(`process: ${data}`) });
+
+                            curlReq.on('close', (code)=> {
+                                console.log(`Curl Exit with Code: ${code}`);
+
+                                if(code === 0){
+                                    request.get(`https://api.gfycat.com/v1/gfycats/fetch/status/${newName}`, (err, res, body)=> {
+                                        if(!err && res.statusCode == 200) {
+                                            console.log(`body: ${body}`);
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                    }
+                });
+            });
+    }
+}
+
+function calculateTaskHash() {
+    return new Promise((resolve)=> {
+        const hmac = new crypto.createHmac('MD5', config.secret);
+        hmac.update(JSON.stringify(task));
+
+        task.hash = hmac.digest('hex');
+        console.log(`Hash was Calculated: ${task.hash}`);
+        resolve();
+    });
 }
 
 /**
@@ -166,7 +240,7 @@ function dotaAction() {
                     const d2launch = spawn(`${config.d2Dir}/dota.sh`, ['-console -exec autoexec']);
 
                     setTimeout(calculateStartTick, 50000);
-                    terminateByFrame(`${config.d2Dir}/dota/`+`${config.recordMovie.recordToDir}${getTerminatedFrame()}.tga`);
+                    terminateByFrame(`${config.d2Dir}/dota/`+`${task.hash}/testmovie${getTerminatedFrame()}.tga`);
                     console.log(`Movie Recording will be Terminate by Frame#${getTerminatedFrame()}.tga`);
 
                     d2launch.on('close', (code) => {
@@ -175,14 +249,17 @@ function dotaAction() {
                             console.log(`Movie Recording is Done`);
 
                             console.log('start ffpmeg');
-                            new ffmpeg(`${config.d2Dir}/dota/test/testmovie%4d.tga`)
+                            new ffmpeg(`${config.d2Dir}/dota/${task.hash}/testmovie%4d.tga`)
                                 .withInputFps('60')
-                                .withVideoCodec('libvpx')
-                                .size(('70%'))
-                                .addOption(['-b:v 0', '-crf 22'])
-                                .saveToFile('/Users/vojjd/Desktop/SniperMovie.webm')
+                                .withVideoCodec('libx264')
+                                .addOption(['-crf 4', '-pix_fmt yuv420p'])
+                                .saveToFile(`/Users/vojjd/Desktop/${task.hash}.mp4`)
+                                //.withVideoCodec('libvpx')
+                                //.size(('70%'))
+                                //.addOption(['-b:v 0', '-crf 22'])
+                                //.saveToFile('/Users/vojjd/Desktop/SniperMovie.webm')
                                 .on('end', ()=> {
-                                    task.status = 'done';
+                                    task.status = 'ffmpeg done';
                                     console.log(`End. Task Status: ${task.status}`);
                                     resolve();
                                 });
@@ -217,7 +294,7 @@ function calculateStartTick() {
                         .replace(/<-recordStartTime->/, `${task.recordStartTime}`)
                         .replace(/<-heroIndex->/, `${task.heroIndex}`)
                         .replace(/<-specMode->/, `${config.recordMovie.specMode}`)
-                        .replace(/<-recordToDir->/, `${config.recordMovie.recordToDir}`)
+                        .replace(/<-recordToDir->/, `${task.hash}/testmovie`) //${config.recordMovie.recordToDir}
                         .replace(/<-maxRecordDuration->/, `${config.recordMovie.maxRecordDuration}`),
                     (err)=> {
                         if(err){ onError(err) }
@@ -291,7 +368,7 @@ function unlinkLog(){
  */
 function unlinkFrames() {
     return new Promise((resolve, reject)=> {
-        let path = `${config.d2Dir}/dota/test`;
+        let path = `${config.d2Dir}/dota/${task.hash}`;
 
         function rmDir(path) {
             fs.rmdir(path, (err)=> {
